@@ -7,13 +7,13 @@ import re
 
 # 1. Configuração da Página
 st.set_page_config(
-    page_title="Gestão de Ponto & Escalas | Turin Transportes",
+    page_title="Turin Transportes — Gestão de Ponto & Escalas",
     page_icon="🚌",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# 2. Design System Professional (CSS Executivo)
+# 2. Design System Personalizado (Identidade Turin - Verde #007106 + Grafite #0f172a)
 st.markdown('''
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -27,32 +27,42 @@ st.markdown('''
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     
+    /* Header Principal com Verde Turin */
     .header-container {
-        background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-        padding: 24px 32px;
+        background: linear-gradient(135deg, #0f172a 0%, #004d04 100%);
+        padding: 28px 36px;
         border-radius: 12px;
         color: white;
         margin-bottom: 24px;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        border-left: 6px solid #007106;
+        box-shadow: 0 4px 12px rgba(0, 113, 6, 0.15);
     }
-    .header-title {
-        font-size: 24px;
-        font-weight: 700;
-        margin: 0;
+    .header-brand {
+        font-size: 28px;
+        font-weight: 800;
+        letter-spacing: 2px;
         color: #ffffff;
+        margin: 0;
+        text-transform: uppercase;
+    }
+    .header-brand span {
+        color: #22c55e;
     }
     .header-subtitle {
         font-size: 14px;
-        color: #94a3b8;
+        color: #cbd5e1;
         margin-top: 6px;
+        font-weight: 400;
     }
     
+    /* Cards de Métricas */
     .metric-card {
         background-color: #ffffff;
         border: 1px solid #e2e8f0;
+        border-top: 4px solid #007106;
         border-radius: 10px;
         padding: 20px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.04);
     }
     .metric-label {
         font-size: 12px;
@@ -67,10 +77,11 @@ st.markdown('''
         color: #0f172a;
         margin-top: 6px;
     }
-    .metric-status-ok { color: #16a34a; }
+    .metric-status-ok { color: #007106; }
     .metric-status-alert { color: #dc2626; }
     .metric-status-warning { color: #d97706; }
     
+    /* Botões Customizados */
     .btn-whatsapp {
         display: block;
         width: 100%;
@@ -87,7 +98,7 @@ st.markdown('''
     .btn-whatsapp-sec {
         display: block;
         width: 100%;
-        background-color: #0284c7;
+        background-color: #007106;
         color: white !important;
         font-weight: 600;
         font-size: 15px;
@@ -104,15 +115,15 @@ st.markdown('''
     </style>
 ''', unsafe_allow_html=True)
 
-# Header Executivo
+# Header Executivo Turin
 st.markdown('''
     <div class="header-container">
-        <div class="header-title">Turin Transportes — Gestão Inteligente de Ponto</div>
-        <div class="header-subtitle">Auditoria de Jornadas, Cadastro Integrado de Contatos e Notificação por WhatsApp</div>
+        <div class="header-brand">TURIN <span>TRANSPORTES</span></div>
+        <div class="header-subtitle">Sistema de Auditoria de Ponto, Jornadas de Motoristas & Gestão de Inconsistências</div>
     </div>
 ''', unsafe_allow_html=True)
 
-# Área de Upload Duplo (Ponto e Cadastro de Telefones)
+# Upload Duplo (Planilha do Flit + Planilha de Contatos)
 col_up1, col_up2 = st.columns(2)
 with col_up1:
     uploaded_file = st.file_uploader("1. Relatório de marcações do Flit (.xlsx ou .csv)", type=["xlsx", "csv"])
@@ -120,7 +131,7 @@ with col_up1:
 with col_up2:
     uploaded_contacts = st.file_uploader("2. Lista de Contatos/WhatsApp (Opcional - Matrícula e Telefone)", type=["xlsx", "csv"])
 
-# Dicionário/DataFrame para armazenar a base de contatos carregada
+# Leitura da Base de Contatos
 df_contatos = None
 if uploaded_contacts is not None:
     try:
@@ -129,21 +140,20 @@ if uploaded_contacts is not None:
         else:
             df_contatos = pd.read_excel(uploaded_contacts)
         
-        # Identificação inteligente das colunas de Matrícula e Telefone
         col_matr = [c for c in df_contatos.columns if 'matr' in c.lower()]
         col_tel = [c for c in df_contatos.columns if 'tel' in c.lower() or 'whats' in c.lower() or 'cel' in c.lower() or 'fone' in c.lower()]
         
         if col_matr and col_tel:
             df_contatos = df_contatos[[col_matr[0], col_tel[0]]].rename(columns={col_matr[0]: 'Matricula', col_tel[0]: 'Telefone_Cadastrado'})
             df_contatos['Matricula'] = pd.to_numeric(df_contatos['Matricula'], errors='coerce')
-            st.success(f"✅ Base de {len(df_contatos)} contatos vinculada com sucesso!")
+            st.success(f"✅ Base com {len(df_contatos)} contatos cadastrados e vinculada!")
         else:
-            st.warning("⚠️ A planilha de contatos precisa conter colunas com os nomes 'Matrícula' e 'Telefone' ou 'WhatsApp'.")
+            st.warning("⚠️ A planilha de contatos precisa ter colunas 'Matrícula' e 'Telefone'.")
             df_contatos = None
     except Exception as e:
         st.error(f"Erro ao ler lista de contatos: {str(e)}")
 
-# Funções auxiliares de extração e jornada
+# Funções Auxiliares
 def extrair_hora_prevista(escala_str):
     if not isinstance(escala_str, str):
         return None
@@ -198,9 +208,9 @@ if uploaded_file is not None:
         
         cols_obrigatorias = ['Colaborador', 'Matricula', 'Data', 'Hora']
         if not all(col in df.columns for col in cols_obrigatorias):
-            st.error(f"Arquivo inválido. Certifique-se de que a planilha do Flit contém: {', '.join(cols_obrigatorias)}")
+            st.error(f"Arquivo inválido. A planilha precisa conter: {', '.join(cols_obrigatorias)}")
         else:
-            # 1. Cruzamento com base de contatos (se fornecida)
+            # 1. Cruzamento com Telefones Cadastrados
             df['Matricula'] = pd.to_numeric(df['Matricula'], errors='coerce')
             if df_contatos is not None:
                 df = df.merge(df_contatos, on='Matricula', how='left')
@@ -225,7 +235,7 @@ if uploaded_file is not None:
                 rotulo = f"Entrada {i//2 + 1}" if i % 2 == 0 else f"Saída {i//2 + 1}"
                 grouped[f"Batida {i+1} ({rotulo})"] = grouped['Hora'].apply(lambda x: x[i] if len(x) > i else "")
 
-            # Auditoria de Status
+            # Classificação de Auditoria
             def classificar_status(row):
                 qtd = row['Qtd_Batidas']
                 esp = row['Batidas_Esperadas']
@@ -303,7 +313,6 @@ if uploaded_file is not None:
                 if len(df_pendencias) == 0:
                     st.success("Nenhuma pendência de marcação faltante ou incompleta encontrada!")
                 else:
-                    # Agrupa pendências incluindo a coluna de telefone se existir
                     cols_group = ['Matricula', 'Colaborador']
                     if 'Telefone_Cadastrado' in df_pendencias.columns:
                         cols_group.append('Telefone_Cadastrado')
@@ -325,7 +334,6 @@ if uploaded_file is not None:
                         datas = dados_colab['Datas_Pendentes']
                         qtd = dados_colab['Qtd_Dias_Pendentes']
                         
-                        # Recupera telefone vinculado se existir
                         tel_padrao = str(dados_colab.get('Telefone_Cadastrado', ''))
                         if tel_padrao == 'nan' or tel_padrao == 'None':
                             tel_padrao = ''
