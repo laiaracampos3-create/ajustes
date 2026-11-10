@@ -14,7 +14,7 @@ st.set_page_config(
 )
 
 # 2. Design System Professional (CSS Executivo)
-st.markdown("""
+st.markdown('''
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
     
@@ -102,15 +102,15 @@ st.markdown("""
         border-right: 1px solid #e2e8f0;
     }
     </style>
-""", unsafe_allow_html=True)
+''', unsafe_allow_html=True)
 
 # Header Executivo
-st.markdown("""
+st.markdown('''
     <div class="header-container">
         <div class="header-title">Turin Transportes — Gestão Inteligente de Ponto</div>
         <div class="header-subtitle">Auditoria Completa de Jornadas (Dupla Pegada, Batidas Faltantes e WhatsApp)</div>
     </div>
-""", unsafe_allow_html=True)
+''', unsafe_allow_html=True)
 
 uploaded_file = st.file_uploader("Selecione ou arraste a planilha exportada do Flit (.xlsx ou .csv)", type=["xlsx", "csv"])
 
@@ -193,20 +193,17 @@ if uploaded_file is not None:
                 rotulo = f"Entrada {i//2 + 1}" if i % 2 == 0 else f"Saída {i//2 + 1}"
                 grouped[f"Batida {i+1} ({rotulo})"] = grouped['Hora'].apply(lambda x: x[i] if len(x) > i else "")
 
-            # 3. Regra de Auditoria Rigorosa (Ímpares OU Batidas Faltantes em relação ao esperado)
+            # 3. Regra de Auditoria Rigorosa
             def classificar_status(row):
                 qtd = row['Qtd_Batidas']
                 esp = row['Batidas_Esperadas']
                 
-                # Batida ímpar (falta entrada ou saída)
                 if qtd % 2 != 0:
                     return f"⚠️ Ímpar ({qtd} batida(s) no dia)"
                 
-                # Falta pegada inteira (ex: era para ter 4 batidas e só tem 2)
                 if esp == 4 and qtd < 4:
                     return f"⚠️ Incompleto ({qtd} de 4 batidas registradas)"
                 
-                # Desvio de horário de entrada
                 prev = row['Hora_Prevista']
                 real = row['Entrada_Real']
                 if prev and real:
@@ -269,7 +266,6 @@ if uploaded_file is not None:
             aba1, aba2 = st.tabs(["💬 Central de Cobrança WhatsApp", "📊 Espelho Completo Pivotado"])
 
             with aba1:
-                # Pega todas as pendências (tanto batidas ímpares quanto dias com menos de 4 batidas)
                 df_pendencias = df_base[df_base['Status_Auditoria'].str.contains('⚠️')].copy()
                 
                 if len(df_pendencias) == 0:
@@ -284,4 +280,62 @@ if uploaded_file is not None:
                     lista_opcoes = [f"{r['Matricula']} - {r['Colaborador']}" for _, r in cobranca_colab.iterrows()]
                     colab_selecionado = st.selectbox("Selecione o colaborador para notificar:", lista_opcoes)
                     
-                    if
+                    if colab_selecionado:
+                        matr_sel = int(colab_selecionado.split(' - ')[0])
+                        dados_colab = cobranca_colab[cobranca_colab['Matricula'] == matr_sel].iloc[0]
+                        
+                        nome = dados_colab['Colaborador']
+                        datas = dados_colab['Datas_Pendentes']
+                        qtd = dados_colab['Qtd_Dias_Pendentes']
+                        
+                        col_tel, col_msg = st.columns([1, 2])
+                        
+                        with col_tel:
+                            st.markdown("##### 📞 Contato do Funcionário")
+                            num_tel = st.text_input("DDD + Número do WhatsApp:", placeholder="Ex: 31988887777", key="tel_input")
+                            num_limpo = re.sub(r'\D', '', num_tel)
+                            if num_limpo and not num_limpo.startswith('55'):
+                                num_limpo = '55' + num_limpo
+
+                        msg = (
+                            f"🚌 *Turin Transportes - Notificação de Ponto*\n\n"
+                            f"Olá, *{nome}* (Matrícula: {matr_sel})!\n\n"
+                            f"Identificamos *{qtd} dia(s)* com marcações incompletas/faltantes no sistema Flit:\n"
+                            f"📅 *Datas com pendência:* {datas}\n\n"
+                            f"Por favor, acesse o aplicativo do Flit Gestor para incluir as batidas ou envie os comprovantes para regularizarmos seu fechamento."
+                        )
+
+                        with col_msg:
+                            st.markdown("##### 📝 Prévia da Mensagem")
+                            st.text_area("Mensagem que será enviada:", value=msg, height=140)
+                            
+                            msg_encoded = urllib.parse.quote(msg)
+                            
+                            if num_limpo:
+                                url_wa = f"https://api.whatsapp.com/send?phone={num_limpo}&text={msg_encoded}"
+                                st.markdown(f'<a href="{url_wa}" target="_blank" class="btn-whatsapp">📲 Abrir Conversa no WhatsApp com {nome}</a>', unsafe_allow_html=True)
+                            else:
+                                url_wa_geral = f"https://web.whatsapp.com/send?text={msg_encoded}"
+                                st.markdown(f'<a href="{url_wa_geral}" target="_blank" class="btn-whatsapp-sec">📲 Abrir WhatsApp Web (Selecionar Contato)</a>', unsafe_allow_html=True)
+
+            with aba2:
+                st.markdown("##### 📋 Tabela Geral de Ponto Pivotada")
+                st.dataframe(df_base, use_container_width=True, hide_index=True)
+
+            # 7. Exportação
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                if len(df_pendencias) > 0:
+                    cobranca_colab.to_excel(writer, index=False, sheet_name='Resumo_Cobrança_WhatsApp')
+                df_base.to_excel(writer, index=False, sheet_name='Base_Pivotada_Completa')
+
+            st.markdown("<br>", unsafe_allow_html=True)
+            st.download_button(
+                label="📥 Baixar Relatório Consolidado em Excel (.xlsx)",
+                data=output.getvalue(),
+                file_name="fechamento_ponto_turin.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+    except Exception as e:
+        st.error(f"Erro ao processar o arquivo: {str(e)}")
