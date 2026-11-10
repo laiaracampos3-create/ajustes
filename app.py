@@ -108,20 +108,48 @@ st.markdown('''
 st.markdown('''
     <div class="header-container">
         <div class="header-title">Turin Transportes — Gestão Inteligente de Ponto</div>
-        <div class="header-subtitle">Auditoria Completa de Jornadas (Dupla Pegada, Batidas Faltantes e WhatsApp)</div>
+        <div class="header-subtitle">Auditoria de Jornadas, Cadastro Integrado de Contatos e Notificação por WhatsApp</div>
     </div>
 ''', unsafe_allow_html=True)
 
-uploaded_file = st.file_uploader("Selecione ou arraste a planilha exportada do Flit (.xlsx ou .csv)", type=["xlsx", "csv"])
+# Área de Upload Duplo (Ponto e Cadastro de Telefones)
+col_up1, col_up2 = st.columns(2)
+with col_up1:
+    uploaded_file = st.file_uploader("1. Relatório de marcações do Flit (.xlsx ou .csv)", type=["xlsx", "csv"])
 
-# Função para extrair hora cadastrada no nome da escala
+with col_up2:
+    uploaded_contacts = st.file_uploader("2. Lista de Contatos/WhatsApp (Opcional - Matrícula e Telefone)", type=["xlsx", "csv"])
+
+# Dicionário/DataFrame para armazenar a base de contatos carregada
+df_contatos = None
+if uploaded_contacts is not None:
+    try:
+        if uploaded_contacts.name.endswith('.csv'):
+            df_contatos = pd.read_csv(uploaded_contacts)
+        else:
+            df_contatos = pd.read_excel(uploaded_contacts)
+        
+        # Identificação inteligente das colunas de Matrícula e Telefone
+        col_matr = [c for c in df_contatos.columns if 'matr' in c.lower()]
+        col_tel = [c for c in df_contatos.columns if 'tel' in c.lower() or 'whats' in c.lower() or 'cel' in c.lower() or 'fone' in c.lower()]
+        
+        if col_matr and col_tel:
+            df_contatos = df_contatos[[col_matr[0], col_tel[0]]].rename(columns={col_matr[0]: 'Matricula', col_tel[0]: 'Telefone_Cadastrado'})
+            df_contatos['Matricula'] = pd.to_numeric(df_contatos['Matricula'], errors='coerce')
+            st.success(f"✅ Base de {len(df_contatos)} contatos vinculada com sucesso!")
+        else:
+            st.warning("⚠️ A planilha de contatos precisa conter colunas com os nomes 'Matrícula' e 'Telefone' ou 'WhatsApp'.")
+            df_contatos = None
+    except Exception as e:
+        st.error(f"Erro ao ler lista de contatos: {str(e)}")
+
+# Funções auxiliares de extração e jornada
 def extrair_hora_prevista(escala_str):
     if not isinstance(escala_str, str):
         return None
     matches = re.findall(r'(\d{1,2}:\d{2})', escala_str)
     return matches[0] if matches else None
 
-# Identifica se a escala exige 4 batidas (motoristas/dupla pegada) ou 2 batidas (administrativo)
 def batidas_esperadas_por_escala(escala_str):
     if not isinstance(escala_str, str):
         return 4
@@ -129,7 +157,6 @@ def batidas_esperadas_por_escala(escala_str):
         return 2
     return 4
 
-# Função de Sugestão de Jornada / Leitura Praticada
 def sugerir_escala_clt(row):
     qtd = row.get('Qtd_Batidas', 0)
     if qtd == 4:
@@ -171,15 +198,20 @@ if uploaded_file is not None:
         
         cols_obrigatorias = ['Colaborador', 'Matricula', 'Data', 'Hora']
         if not all(col in df.columns for col in cols_obrigatorias):
-            st.error(f"Arquivo inválido. Certifique-se de que a planilha contém: {', '.join(cols_obrigatorias)}")
+            st.error(f"Arquivo inválido. Certifique-se de que a planilha do Flit contém: {', '.join(cols_obrigatorias)}")
         else:
-            # 1. Tratamento e Ordenação
+            # 1. Cruzamento com base de contatos (se fornecida)
+            df['Matricula'] = pd.to_numeric(df['Matricula'], errors='coerce')
+            if df_contatos is not None:
+                df = df.merge(df_contatos, on='Matricula', how='left')
+
+            # 2. Tratamento e Ordenação
             df['Data_dt'] = pd.to_datetime(df['Data'], format='%d/%m/%Y', errors='coerce')
             df_sorted = df.sort_values(by=['Matricula', 'Data_dt', 'Hora'])
 
-            meta_cols = [c for c in ['Matricula', 'Colaborador', 'Empresa', 'Departamento', 'Cargo', 'Escala'] if c in df.columns]
+            meta_cols = [c for c in ['Matricula', 'Colaborador', 'Empresa', 'Departamento', 'Cargo', 'Escala', 'Telefone_Cadastrado'] if c in df.columns]
 
-            # 2. Pivotamento e Agrupamento
+            # 3. Pivotamento e Agrupamento
             grouped = df_sorted.groupby(meta_cols + ['Data', 'Data_dt'])['Hora'].apply(list).reset_index()
 
             grouped['Qtd_Batidas'] = grouped['Hora'].apply(len)
@@ -193,7 +225,7 @@ if uploaded_file is not None:
                 rotulo = f"Entrada {i//2 + 1}" if i % 2 == 0 else f"Saída {i//2 + 1}"
                 grouped[f"Batida {i+1} ({rotulo})"] = grouped['Hora'].apply(lambda x: x[i] if len(x) > i else "")
 
-            # 3. Regra de Auditoria Rigorosa
+            # Auditoria de Status
             def classificar_status(row):
                 qtd = row['Qtd_Batidas']
                 esp = row['Batidas_Esperadas']
@@ -271,7 +303,12 @@ if uploaded_file is not None:
                 if len(df_pendencias) == 0:
                     st.success("Nenhuma pendência de marcação faltante ou incompleta encontrada!")
                 else:
-                    cobranca_colab = df_pendencias.groupby(['Matricula', 'Colaborador'])['Data'].apply(list).reset_index()
+                    # Agrupa pendências incluindo a coluna de telefone se existir
+                    cols_group = ['Matricula', 'Colaborador']
+                    if 'Telefone_Cadastrado' in df_pendencias.columns:
+                        cols_group.append('Telefone_Cadastrado')
+
+                    cobranca_colab = df_pendencias.groupby(cols_group)['Data'].apply(list).reset_index()
                     cobranca_colab['Qtd_Dias_Pendentes'] = cobranca_colab['Data'].apply(len)
                     cobranca_colab['Datas_Pendentes'] = cobranca_colab['Data'].apply(lambda x: ", ".join(x))
                     
@@ -288,11 +325,16 @@ if uploaded_file is not None:
                         datas = dados_colab['Datas_Pendentes']
                         qtd = dados_colab['Qtd_Dias_Pendentes']
                         
+                        # Recupera telefone vinculado se existir
+                        tel_padrao = str(dados_colab.get('Telefone_Cadastrado', ''))
+                        if tel_padrao == 'nan' or tel_padrao == 'None':
+                            tel_padrao = ''
+
                         col_tel, col_msg = st.columns([1, 2])
                         
                         with col_tel:
                             st.markdown("##### 📞 Contato do Funcionário")
-                            num_tel = st.text_input("DDD + Número do WhatsApp:", placeholder="Ex: 31988887777", key="tel_input")
+                            num_tel = st.text_input("DDD + Número do WhatsApp:", value=tel_padrao, placeholder="Ex: 31988887777", key="tel_input")
                             num_limpo = re.sub(r'\D', '', num_tel)
                             if num_limpo and not num_limpo.startswith('55'):
                                 num_limpo = '55' + num_limpo
@@ -322,7 +364,7 @@ if uploaded_file is not None:
                 st.markdown("##### 📋 Tabela Geral de Ponto Pivotada")
                 st.dataframe(df_base, use_container_width=True, hide_index=True)
 
-            # 7. Exportação
+            # Exportação
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
                 if len(df_pendencias) > 0:
