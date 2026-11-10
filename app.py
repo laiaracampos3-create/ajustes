@@ -13,7 +13,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 2. Design System Personalizado (Identidade Turin - Verde #007106 + Grafite #0f172a)
+# 2. Design System Personalizado (Verde Turin #007106 + Grafite #0f172a)
 st.markdown('''
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -27,7 +27,6 @@ st.markdown('''
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     
-    /* Header Principal com Verde Turin */
     .header-container {
         background: linear-gradient(135deg, #0f172a 0%, #004d04 100%);
         padding: 28px 36px;
@@ -55,7 +54,6 @@ st.markdown('''
         font-weight: 400;
     }
     
-    /* Cards de Métricas */
     .metric-card {
         background-color: #ffffff;
         border: 1px solid #e2e8f0;
@@ -81,7 +79,6 @@ st.markdown('''
     .metric-status-alert { color: #dc2626; }
     .metric-status-warning { color: #d97706; }
     
-    /* Botões Customizados */
     .btn-whatsapp {
         display: block;
         width: 100%;
