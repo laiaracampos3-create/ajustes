@@ -40,12 +40,12 @@ st.markdown('''
         font-size: 28px;
         font-weight: 800;
         letter-spacing: 2px;
-        color: #ffffff;
+        color: #22c55e;
         margin: 0;
         text-transform: uppercase;
     }
     .header-brand span {
-        color: #22c55e;
+        color: #ffffff;
     }
     .header-subtitle {
         font-size: 14px;
@@ -112,7 +112,7 @@ st.markdown('''
     </style>
 ''', unsafe_allow_html=True)
 
-# Header Executivo Turin
+# Header Executivo Turin (Corrigido)
 st.markdown('''
     <div class="header-container">
         <div class="header-brand">TURIN <span>TRANSPORTES</span></div>
