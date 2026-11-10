@@ -1,21 +1,43 @@
 import streamlit as st
 import pandas as pd
+import datetime
 import io
+import re
 
 st.set_page_config(
-    page_title="Fechamento de Ponto & Escalas - Turin Transportes", 
+    page_title="Auditoria de Escalas e Ponto - Turin Transportes", 
     page_icon="🚌", 
     layout="wide"
 )
 
-st.title("🚌 Automação de Fechamento de Ponto e Escalas (Flit)")
-st.markdown("Carregue o relatório bruto do Flit para pivotar batidas, conferir inconsistências e identificar a escala real praticada.")
+st.title("🚌 Auditoria de Escalas Cadastradas vs. Batidas Reais")
+st.markdown("Verifique se a escala do motorista condiz com o praticado e receba sugestões automáticas ajustadas para 7h20 diárias (44h semanais).")
 
-uploaded_file = st.file_uploader("Arraste o relatório do Flit (.xlsx ou .csv)", type=["xlsx", "csv"])
+uploaded_file = st.file_uploader("Arraste o relatório de marcações do Flit (.xlsx ou .csv)", type=["xlsx", "csv"])
+
+# Função para extrair hora prevista na string da escala
+def extrair_hora_prevista(escala_str):
+    if not isinstance(escala_str, str):
+        return None
+    matches = re.findall(r'(\d{1,2}:\d{2})', escala_str)
+    return matches[0] if matches else None
+
+# Função para sugerir escala enquadrada em 7h20 trabalho + 1h intervalo (8h20 de amplitude)
+def sugerir_escala_clt_7h20(hora_entrada_real):
+    if not hora_entrada_real or not isinstance(hora_entrada_real, str):
+        return "Sem batida de entrada"
+    try:
+        t_in = datetime.datetime.strptime(hora_entrada_real, '%H:%M')
+        t_out = t_in + datetime.timedelta(hours=8, minutes=20)
+        t_int_in = t_in + datetime.timedelta(hours=4)
+        t_int_out = t_int_in + datetime.timedelta(hours=1)
+        
+        return f"{t_in.strftime('%H:%M')} às {t_out.strftime('%H:%M')} (Int: {t_int_in.strftime('%H:%M')}-{t_int_out.strftime('%H:%M')})"
+    except:
+        return "Horário Inválido"
 
 if uploaded_file is not None:
     try:
-        # Carregamento do arquivo
         if uploaded_file.name.endswith('.csv'):
             df = pd.read_csv(uploaded_file)
         else:
@@ -34,34 +56,37 @@ if uploaded_file is not None:
             # 2. Agrupamento por funcionário e data
             grouped = df_sorted.groupby(meta_cols + ['Data', 'Data_dt'])['Hora'].apply(list).reset_index()
 
-            # 3. Regras de Inconsistência e Batidas
+            # Batidas de Entrada e Saída Reais
+            grouped['Entrada_Real'] = grouped['Hora'].apply(lambda x: x[0] if len(x) > 0 else "")
+            grouped['Saida_Real'] = grouped['Hora'].apply(lambda x: x[-1] if len(x) > 0 else "")
             grouped['Qtd_Batidas'] = grouped['Hora'].apply(len)
-            grouped['Status_Batida'] = grouped['Qtd_Batidas'].apply(
-                lambda x: '⚠️ ÍMPAR / MARCAÇÃO FALTANTE' if x % 2 != 0 else '✅ OK'
-            )
-            
-            # Identifica Entrada Real (1ª batida) e Saída Real (Última batida)
-            grouped['Primeira_Batida'] = grouped['Hora'].apply(lambda x: x[0] if len(x) > 0 else "")
-            grouped['Ultima_Batida'] = grouped['Hora'].apply(lambda x: x[-1] if len(x) > 0 else "")
 
-            # Classificação Automática do Turno Praticado pela 1ª Batida
-            def classificar_turno(hora_str):
-                if not hora_str:
-                    return "Sem Marcação"
-                try:
-                    h = int(hora_str.split(':')[0])
-                    if 4 <= h < 11:
-                        return "🌅 Turno Manhã (Entrada 04h-10h)"
-                    elif 11 <= h < 17:
-                        return "☀️ Turno Tarde (Entrada 11h-16h)"
-                    elif 17 <= h < 22:
-                        return "🌙 Turno Noite (Entrada 17h-21h)"
-                    else:
-                        return "🌌 Turno Madrugada (Entrada 22h-03h)"
-                except:
-                    return "Indefinido"
+            # Extração de Hora Prevista na Escala Cadastrada
+            grouped['Entrada_Prevista_Escala'] = grouped['Escala'].apply(extrair_hora_prevista)
 
-            grouped['Turno_Identificado'] = grouped['Primeira_Batida'].apply(classificar_turno)
+            # 3. Regra de Auditoria de Escala (Diferença > 15 minutos)
+            def auditar_escala(row):
+                if row['Qtd_Batidas'] % 2 != 0:
+                    return "⚠️ Batida Ímpar / Marcação Pendente"
+                
+                prev = row['Entrada_Prevista_Escala']
+                real = row['Entrada_Real']
+                
+                if prev and real:
+                    try:
+                        t_prev = datetime.datetime.strptime(prev, '%H:%M')
+                        t_real = datetime.datetime.strptime(real, '%H:%M')
+                        diff = abs((t_real - t_prev).total_seconds()) / 60.0
+                        if diff > 15:
+                            return f"⚠️ Desvio de Escala ({prev} cadastrado vs {real} real)"
+                    except:
+                        pass
+                return "✅ Escala OK"
+
+            grouped['Status_Auditoria'] = grouped.apply(auditar_escala, axis=1)
+
+            # 4. Sugestão da Escala CLT (7h20 diárias)
+            grouped['Sugestao_Escala_7h20'] = grouped['Entrada_Real'].apply(sugerir_escala_clt_7h20)
 
             # Expansão horizontal de batidas
             max_batidas = grouped['Hora'].apply(len).max()
@@ -71,20 +96,21 @@ if uploaded_file is not None:
 
             df_final = grouped.drop(columns=['Hora', 'Data_dt']).sort_values(by=['Colaborador', 'Data'])
 
-            # 4. Filtros Laterais
-            st.sidebar.header("🔍 Filtros de Busca")
-
+            # 5. Filtros Laterais
+            st.sidebar.header("🔍 Filtros")
+            
             if 'Departamento' in df_final.columns:
                 deptos = ['Todos'] + list(df_final['Departamento'].dropna().unique())
-                depto_sel = st.sidebar.selectbox("Filtrar por Departamento:", deptos)
+                depto_sel = st.sidebar.selectbox("Departamento:", deptos)
                 if depto_sel != 'Todos':
                     df_final = df_final[df_final['Departamento'] == depto_sel]
 
-            if 'Escala' in df_final.columns:
-                escalas = ['Todas'] + list(df_final['Escala'].dropna().unique())
-                escala_sel = st.sidebar.selectbox("Filtrar por Escala Cadastrada:", escalas)
-                if escala_sel != 'Todas':
-                    df_final = df_final[df_final['Escala'] == escala_sel]
+            status_opcoes = ['Todos', 'Apenas Desvios de Escala e Batidas Ímpares', 'Apenas ✅ OK']
+            status_sel = st.sidebar.radio("Filtrar por Status de Auditoria:", status_opcoes)
+            if status_sel == 'Apenas Desvios de Escala e Batidas Ímpares':
+                df_final = df_final[df_final['Status_Auditoria'].str.contains('⚠️')]
+            elif status_sel == 'Apenas ✅ OK':
+                df_final = df_final[df_final['Status_Auditoria'] == '✅ Escala OK']
 
             busca_nome = st.sidebar.text_input("Buscar por Nome ou Matrícula:")
             if busca_nome:
@@ -93,55 +119,44 @@ if uploaded_file is not None:
                     df_final['Matricula'].astype(str).str.contains(busca_nome, case=False, na=False)
                 ]
 
-            # 5. Painel de KPIs
-            total_dias = len(df_final)
-            total_erros = len(df_final[df_final['Status_Batida'].str.contains('⚠️')])
-            total_ok = total_dias - total_erros
-            pct_erros = (total_erros / total_dias * 100) if total_dias > 0 else 0
+            # 6. Painel de KPIs
+            total = len(df_final)
+            desvios = len(df_final[df_final['Status_Auditoria'].str.contains('Desvio')])
+            impares = len(df_final[df_final['Status_Auditoria'].str.contains('Ímpar')])
+            ok = len(df_final[df_final['Status_Auditoria'] == '✅ Escala OK'])
 
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Dias Analisados", total_dias)
-            col2.metric("Batidas OK", total_ok)
-            col3.metric("Batidas Ímpares", total_erros)
-            col4.metric("% Inconsistências", f"{pct_erros:.1f}%")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Registros Filtrados", total)
+            c2.metric("Escalas Conformes (OK)", ok)
+            c3.metric("Desvios de Escala", desvios)
+            c4.metric("Batidas Ímpares", impares)
 
             st.markdown("---")
 
-            # 6. Abas de Trabalho
-            aba1, aba2, aba3 = st.tabs([
-                "⚠️ Pendências de Ponto", 
-                "🚌 Identificação de Escalas / Turnos", 
-                "📋 Base Completa Pivotada"
-            ])
-
-            df_erros = df_final[df_final['Status_Batida'].str.contains('⚠️')]
+            # 7. Abas de Resultados
+            aba1, aba2 = st.tabs(["🎯 Auditoria de Escala & Sugestão 7h20", "📋 Espelho Completo Pivotado"])
 
             with aba1:
-                st.subheader(f"Batidas Ímpares / Incompletas ({len(df_erros)} ocorrências)")
-                st.dataframe(df_erros, use_container_width=True)
+                st.subheader("Análise de Compatibilidade e Sugestão de Horário CLT")
+                cols_sugestao = [c for c in ['Matricula', 'Colaborador', 'Data', 'Escala', 'Entrada_Real', 'Saida_Real', 'Status_Auditoria', 'Sugestao_Escala_7h20'] if c in df_final.columns]
+                st.dataframe(df_final[cols_sugestao], use_container_width=True)
 
             with aba2:
-                st.subheader("Mapeamento de Escala Cadastrada vs. Turno Praticado")
-                cols_escala = [c for c in ['Matricula', 'Colaborador', 'Departamento', 'Escala', 'Data', 'Primeira_Batida', 'Ultima_Batida', 'Turno_Identificado'] if c in df_final.columns]
-                st.dataframe(df_final[cols_escala], use_container_width=True)
-
-            with aba3:
-                st.subheader("Espelho de Ponto Pivotado")
+                st.subheader("Base Completa com Todas as Batidas Organizadas")
                 st.dataframe(df_final, use_container_width=True)
 
-            # 7. Gerador de Arquivo Excel
+            # 8. Exportação para Excel
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                df_erros.to_excel(writer, index=False, sheet_name='Pendencias_Cobranca')
+                df_final[cols_sugestao].to_excel(writer, index=False, sheet_name='Auditoria_e_Sugestao_Escalas')
                 df_final.to_excel(writer, index=False, sheet_name='Base_Completa_Pivotada')
 
             st.download_button(
-                label="📥 Baixar Relatório Excel Otimizado (.xlsx)",
+                label="📥 Baixar Relatório de Auditoria e Sugestões (.xlsx)",
                 data=output.getvalue(),
-                file_name="fechamento_ponto_e_escalas_flit.xlsx",
+                file_name="auditoria_escalas_sugestao_7h20.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
     except Exception as e:
         st.error(f"Erro ao processar o arquivo: {str(e)}")
-    
