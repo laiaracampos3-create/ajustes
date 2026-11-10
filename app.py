@@ -112,7 +112,7 @@ st.markdown('''
     </style>
 ''', unsafe_allow_html=True)
 
-# Header Executivo Turin (Corrigido)
+# Header Executivo Turin
 st.markdown('''
     <div class="header-container">
         <div class="header-brand">TURIN <span>TRANSPORTES</span></div>
