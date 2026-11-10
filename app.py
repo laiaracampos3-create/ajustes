@@ -143,7 +143,7 @@ if uploaded_contacts is not None:
         if col_matr and col_tel:
             df_contatos = df_contatos[[col_matr[0], col_tel[0]]].rename(columns={col_matr[0]: 'Matricula', col_tel[0]: 'Telefone_Cadastrado'})
             df_contatos['Matricula'] = pd.to_numeric(df_contatos['Matricula'], errors='coerce')
-            df_contatos = df_contatos.drop_duplicates(subset=['Matricula'])
+            df_contatos = df_contatos.dropna(subset=['Matricula']).drop_duplicates(subset=['Matricula'])
             st.success(f"✅ Base com {len(df_contatos)} contatos cadastrados e vinculada!")
         else:
             st.warning("⚠️ A planilha de contatos precisa ter colunas 'Matrícula' e 'Telefone'.")
@@ -216,7 +216,7 @@ if uploaded_file is not None:
 
             meta_cols = [c for c in ['Matricula', 'Colaborador', 'Empresa', 'Departamento', 'Cargo', 'Escala'] if c in df.columns]
 
-            # 2. Pivotamento Seguro (Sem Perda por Telefones Faltantes)
+            # 2. Pivotamento Seguro
             grouped = df_sorted.groupby(meta_cols + ['Data', 'Data_dt'])['Hora'].apply(list).reset_index()
 
             # 3. Cruzamento com Lista de Contatos
@@ -373,10 +373,7 @@ if uploaded_file is not None:
 
             # Exportação
             output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                if len(df_pendencias) > 0:
-                    cobranca_colab.to_excel(writer, index=False, sheet_name='Resumo_Cobrança_WhatsApp')
-                df_base.to_excel(writer, index=False, sheet_name='Base_Pivotada_Completa')
+            df_base.to_excel(output, index=False)
 
             st.markdown("<br>", unsafe_allow_html=True)
             st.download_button(
