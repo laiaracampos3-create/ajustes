@@ -143,6 +143,7 @@ if uploaded_contacts is not None:
         if col_matr and col_tel:
             df_contatos = df_contatos[[col_matr[0], col_tel[0]]].rename(columns={col_matr[0]: 'Matricula', col_tel[0]: 'Telefone_Cadastrado'})
             df_contatos['Matricula'] = pd.to_numeric(df_contatos['Matricula'], errors='coerce')
+            df_contatos = df_contatos.drop_duplicates(subset=['Matricula'])
             st.success(f"✅ Base com {len(df_contatos)} contatos cadastrados e vinculada!")
         else:
             st.warning("⚠️ A planilha de contatos precisa ter colunas 'Matrícula' e 'Telefone'.")
@@ -160,7 +161,7 @@ def extrair_hora_prevista(escala_str):
 def batidas_esperadas_por_escala(escala_str):
     if not isinstance(escala_str, str):
         return 4
-    if re.search(r'adm|escritório|manutenção|08:00 ás 17:00|07:00 ás 17:00', escala_str, re.IGNORECASE):
+    if re.search(r'sem intervalo|1 pegada|corrida|6h seguidas|08:00 ás 12:00', escala_str, re.IGNORECASE):
         return 2
     return 4
 
@@ -207,19 +208,20 @@ if uploaded_file is not None:
         if not all(col in df.columns for col in cols_obrigatorias):
             st.error(f"Arquivo inválido. A planilha precisa conter: {', '.join(cols_obrigatorias)}")
         else:
-            # 1. Cruzamento com Telefones Cadastrados
             df['Matricula'] = pd.to_numeric(df['Matricula'], errors='coerce')
-            if df_contatos is not None:
-                df = df.merge(df_contatos, on='Matricula', how='left')
 
-            # 2. Tratamento e Ordenação
+            # 1. Tratamento e Ordenação
             df['Data_dt'] = pd.to_datetime(df['Data'], format='%d/%m/%Y', errors='coerce')
             df_sorted = df.sort_values(by=['Matricula', 'Data_dt', 'Hora'])
 
-            meta_cols = [c for c in ['Matricula', 'Colaborador', 'Empresa', 'Departamento', 'Cargo', 'Escala', 'Telefone_Cadastrado'] if c in df.columns]
+            meta_cols = [c for c in ['Matricula', 'Colaborador', 'Empresa', 'Departamento', 'Cargo', 'Escala'] if c in df.columns]
 
-            # 3. Pivotamento e Agrupamento
+            # 2. Pivotamento Seguro (Sem Perda por Telefones Faltantes)
             grouped = df_sorted.groupby(meta_cols + ['Data', 'Data_dt'])['Hora'].apply(list).reset_index()
+
+            # 3. Cruzamento com Lista de Contatos
+            if df_contatos is not None:
+                grouped = grouped.merge(df_contatos, on='Matricula', how='left')
 
             grouped['Qtd_Batidas'] = grouped['Hora'].apply(len)
             grouped['Entrada_Real'] = grouped['Hora'].apply(lambda x: x[0] if len(x) > 0 else "")
